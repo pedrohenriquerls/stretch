@@ -8,6 +8,7 @@ use crate::result::Layout;
 use crate::style::*;
 use crate::sys;
 use crate::Error;
+use crate::component::Component;
 
 pub enum MeasureFunc {
     Raw(fn(Size<Number>) -> Size<f32>),
@@ -18,11 +19,12 @@ pub enum MeasureFunc {
 /// Global stretch instance id allocator.
 static INSTANCE_ALLOCATOR: id::Allocator = id::Allocator::new();
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(not(any(feature = "std", feature = "alloc")), derive(hash32_derive::Hash32))]
 pub struct Node {
     instance: id::Id,
     local: id::Id,
+    component: Box<dyn Component>
 }
 
 pub struct Stretch {
@@ -54,9 +56,9 @@ impl Stretch {
         }
     }
 
-    fn allocate_node(&mut self) -> Node {
+    fn allocate_node(&mut self, component: Box<dyn Component>) -> Node {
         let local = self.nodes.allocate();
-        Node { instance: self.id, local }
+        Node { instance: self.id, local, component }
     }
 
     fn add_node(&mut self, node: Node, id: NodeId) {
@@ -72,15 +74,15 @@ impl Stretch {
         }
     }
 
-    pub fn new_leaf(&mut self, style: Style, measure: MeasureFunc) -> Result<Node, Error> {
-        let node = self.allocate_node();
+    pub fn new_leaf(&mut self, style: Style, component: Box<dyn Component>, measure: MeasureFunc) -> Result<Node, Error> {
+        let node = self.allocate_node(component);
         let id = self.forest.new_leaf(style, measure);
         self.add_node(node, id);
         Ok(node)
     }
 
-    pub fn new_node(&mut self, style: Style, children: &[Node]) -> Result<Node, Error> {
-        let node = self.allocate_node();
+    pub fn new_node(&mut self, style: Style, component: Box<dyn Component>, children: &[Node]) -> Result<Node, Error> {
+        let node = self.allocate_node(component);
         let children =
             children.iter().map(|child| self.find_node(*child)).collect::<Result<sys::ChildrenVec<_>, Error>>()?;
         let id = self.forest.new_node(style, children);
@@ -96,8 +98,7 @@ impl Stretch {
             self.nodes.free(&[node.local]);
         }
         self.nodes_to_ids.clear();
-        self.ids_to_nodes.clear();
-        self.forest.clear();
+        self.ids_to_nodes.clear(); self.forest.clear();
     }
 
     /// Remove nodes.
