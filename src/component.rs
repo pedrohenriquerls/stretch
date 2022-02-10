@@ -10,19 +10,14 @@ pub trait Component: ComponentClone {
 }
 pub trait ComponentClone {
     fn clone_box(&self) -> Box<dyn Component>;
-    fn copy_box(&self) -> Box<dyn Component>;
 }
 
 impl<T> ComponentClone for T
 where
-    T: 'static + Component + Clone,
+    T: 'static + Component + Clone + PartialEq + Copy,
 {
     fn clone_box(&self) -> Box<dyn Component> {
         Box::new(self.clone())
-    }
-
-    fn copy_box(&self) -> Box<dyn Component> {
-        Box::new(self.copy())
     }
 }
 

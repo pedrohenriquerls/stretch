@@ -19,12 +19,11 @@ pub enum MeasureFunc {
 /// Global stretch instance id allocator.
 static INSTANCE_ALLOCATOR: id::Allocator = id::Allocator::new();
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(not(any(feature = "std", feature = "alloc")), derive(hash32_derive::Hash32))]
 pub struct Node {
     instance: id::Id,
     local: id::Id,
-    component: Box<dyn Component>
 }
 
 pub struct Stretch {
@@ -32,6 +31,7 @@ pub struct Stretch {
     nodes: id::Allocator,
     nodes_to_ids: crate::sys::Map<Node, NodeId>,
     ids_to_nodes: crate::sys::Map<NodeId, Node>,
+    nodes_to_components: crate::sys::Map<Node, Option<Box<dyn Component>>>,
     forest: Forest,
 }
 
@@ -52,18 +52,20 @@ impl Stretch {
             nodes: id::Allocator::new(),
             nodes_to_ids: crate::sys::new_map_with_capacity(capacity),
             ids_to_nodes: crate::sys::new_map_with_capacity(capacity),
+            nodes_to_components: crate::sys::new_map_with_capacity(capacity),
             forest: Forest::with_capacity(capacity),
         }
     }
 
-    fn allocate_node(&mut self, component: Box<dyn Component>) -> Node {
+    fn allocate_node(&mut self) -> Node {
         let local = self.nodes.allocate();
-        Node { instance: self.id, local, component }
+        Node { instance: self.id, local }
     }
 
-    fn add_node(&mut self, node: Node, id: NodeId) {
+    fn add_node(&mut self, node: Node, component: Option<Box<dyn Component>>, id: NodeId) {
         let _ = self.nodes_to_ids.insert(node, id);
         let _ = self.ids_to_nodes.insert(id, node);
+        let _ = self.nodes_to_components.insert(node, component);
     }
 
     // Find node in the forest.
@@ -74,20 +76,43 @@ impl Stretch {
         }
     }
 
-    pub fn new_leaf(&mut self, style: Style, component: Box<dyn Component>, measure: MeasureFunc) -> Result<Node, Error> {
-        let node = self.allocate_node(component);
+    pub fn new_leaf(&mut self, style: Style, measure: MeasureFunc) -> Result<Node, Error> {
+        let node = self.allocate_node();
         let id = self.forest.new_leaf(style, measure);
-        self.add_node(node, id);
+        self.add_node(node, None, id);
         Ok(node)
     }
 
-    pub fn new_node(&mut self, style: Style, component: Box<dyn Component>, children: &[Node]) -> Result<Node, Error> {
-        let node = self.allocate_node(component);
+    pub fn new_node(&mut self, style: Style, children: &[Node]) -> Result<Node, Error> {
+        let node = self.allocate_node();
         let children =
             children.iter().map(|child| self.find_node(*child)).collect::<Result<sys::ChildrenVec<_>, Error>>()?;
         let id = self.forest.new_node(style, children);
-        self.add_node(node, id);
+        self.add_node(node, None, id);
         Ok(node)
+    }
+
+    pub fn new_leaf_with_component(&mut self, style: Style, component: Box<dyn Component>, measure: MeasureFunc) -> Result<Node, Error> {
+        let node = self.allocate_node();
+        let id = self.forest.new_leaf(style, measure);
+        self.add_node(node, Some(component), id);
+        Ok(node)
+    }
+
+    pub fn new_node_with_component(&mut self, style: Style, component: Box<dyn Component>, children: &[Node]) -> Result<Node, Error> {
+        let node = self.allocate_node();
+        let children =
+            children.iter().map(|child| self.find_node(*child)).collect::<Result<sys::ChildrenVec<_>, Error>>()?;
+        let id = self.forest.new_node(style, children);
+        self.add_node(node, Some(component), id);
+        Ok(node)
+    }
+
+    pub fn fetch_component_by_node(&self, node: Node) -> Result<&Option<Box<dyn Component>>, Error> {
+        match self.nodes_to_components.get(&node) {
+            Some(component) => Ok(component),
+            None => Err(Error::InvalidNode(node))
+        }
     }
 
     /// Removes all nodes.
